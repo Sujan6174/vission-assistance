@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>VisionAssist AI - Accessible Web App</title>
+  
+  <!-- Tesseract.js for 100% Browser-Based Offline OCR -->
+  <script src="https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js"></script>
+
+  <style>
+    :root {
+      --bg: #000000;
+      --card: #121212;
+      --accent: #FFE600; /* WCAG AAA High Contrast Yellow */
+      --text: #FFFFFF;
+      --danger: #FF3333;
+      --border: #333333;
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, sans-serif;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      min-height: 100vh;
+      padding: 16px;
+    }
+
+    /* Security & Permission Gate Overlay */
+    #permission-overlay {
+      position: fixed;
+      inset: 0;
+      background-color: var(--bg);
+      z-index: 1000;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      align-items: center;
+      padding: 24px;
+      text-align: center;
+    }
+
+    .perm-card {
+      background: var(--card);
+      border: 3px solid var(--accent);
+      border-radius: 16px;
+      padding: 32px 24px;
+      max-width: 480px;
+      width: 100%;
+    }
+
+    h1 {
+      font-size: 2rem;
+      margin-bottom: 16px;
+      color: var(--accent);
+    }
+
+    p {
+      font-size: 1.15rem;
+      line-height: 1.5;
+      margin-bottom: 24px;
+    }
+
+    input[type="password"] {
+      width: 100%;
+      padding: 16px;
+      font-size: 1rem;
+      border-radius: 8px;
+      border: 2px solid var(--accent);
+      background: #000;
+      color: #fff;
+      margin-bottom: 16px;
+    }
+
+    .btn {
+      background-color: var(--accent);
+      color: #000000;
+      font-weight: 800;
+      font-size: 1.25rem;
+      padding: 20px;
+      border: none;
+      border-radius: 12px;
+      width: 100%;
+      cursor: pointer;
+      min-height: 64px;
+      margin-bottom: 12px;
+    }
+
+    .btn:focus, .btn:hover {
+      outline: 4px solid #FFFFFF;
+      background-color: #FFF066;
+    }
+
+    /* Main Accessible App Interface */
+    #app-container {
+      width: 100%;
+      max-width: 600px;
+      display: none;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .viewfinder {
+      position: relative;
+      width: 100%;
+      aspect-ratio: 4/3;
+      background-color: #1a1a1a;
+      border: 3px solid var(--accent);
+      border-radius: 16px;
+      overflow: hidden;
+    }
+
+    video {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+    }
+
+    #tts-output {
+      background-color: var(--card);
+      border: 2px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      font-size: 1.25rem;
+      font-weight: bold;
+      min-height: 110px;
+    }
+  </style>
+</head>
+<body>
+
+  <!-- Permission Gate Modal -->
+  <div id="permission-overlay" role="dialog" aria-labelledby="perm-title">
+    <div class="perm-card">
+      <h1 id="perm-title">VisionAssist Setup</h1>
+      <p>Enter your Gemini API Key (optional for online AI) and grant <strong>Camera</strong> and <strong>Microphone</strong> permissions to begin.</p>
+      
+      <input type="password" id="api-key-input" placeholder="Paste Gemini API Key here (Optional)">
+      <button class="btn" onclick="initializePermissions()">ENABLE CAMERA & MICROPHONE</button>
+      <p id="perm-error" style="color: var(--danger); display: none;" aria-live="assertive"></p>
+    </div>
+  </div>
+
+  <!-- Accessible UI -->
+  <main id="app-container">
+    <header>
+      <h1>VisionAssist AI</h1>
+    </header>
+
+    <section class="viewfinder" aria-label="Camera Preview">
+      <video id="webcam" autoplay playsinline muted></video>
+    </section>
+
+    <!-- One-Tap Scan Area -->
+    <button class="btn" id="scan-btn" onclick="captureAndProcess()" aria-label="Scan item in front of camera">
+      📷 ONE-TAP SCAN
+    </button>
+
+    <div id="tts-output" aria-live="polite" role="status">
+      Ready. Press "ONE-TAP SCAN" to identify items.
+    </div>
+  </main>
+
+  <canvas id="canvas" style="display:none;"></canvas>
+
+  <script>
+    let videoStream = null;
+    let apiKey = "";
+
+    async function initializePermissions() {
+      const errorElem = document.getElementById("perm-error");
+      apiKey = document.getElementById("api-key-input").value.trim();
+
+      try {
+        // Enforce Camera and Microphone access
+        videoStream = await navigator.mediaDevices.getUserMedia({
+          video: { facingMode: "environment" },
+          audio: true
+        });
+
+        document.getElementById("webcam").srcObject = videoStream;
+        document.getElementById("permission-overlay").style.display = "none";
+        document.getElementById("app-container").style.display = "flex";
+
+        speak("Permissions granted. Camera and microphone active.");
+      } catch (err) {
+        errorElem.innerText = "Access denied. Please enable camera/microphone permissions in browser settings.";
+        errorElem.style.display = "block";
+        speak("Device access was denied.");
+      }
+    }
+
+    function speak(text) {
+      document.getElementById("tts-output").innerText = text;
+      window.speechSynthesis.cancel();
+      const utterance = new SpeechSynthesisUtterance(text);
+      utterance.rate = 1.0;
+      window.speechSynthesis.speak(utterance);
+    }
+
+    async function captureAndProcess() {
+      if (!videoStream) return;
+
+      speak("Scanning image...");
+
+      const video = document.getElementById("webcam");
+      const canvas = document.getElementById("canvas");
+      canvas.width = video.videoWidth || 640;
+      canvas.height = video.videoHeight || 480;
+
+      const ctx = canvas.getContext("2d");
+      ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+      const base64Image = canvas.toDataURL("image/jpeg", 0.8);
+      const base64Data = base64Image.split(",")[1];
+
+      // 1. ONLINE MODE: Gemini API via browser fetch
+      if (navigator.onLine && apiKey) {
+        try {
+          const response = await fetch(
+            `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${apiKey}`,
+            {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                contents: [{
+                  parts: [
+                    {
+                      text: "You are an assistant for a visually impaired user. Concise description in 1-2 sentences. Identify if it is a medication, grocery, or other object and read core text."
+                    },
+                    {
+                      inline_data: { mime_type: "image/jpeg", data: base64Data }
+                    }
+                  ]
+                }]
+              })
+            }
+          );
+
+          const result = await response.json();
+          const description = result.candidates[0].content.parts[0].text;
+          speak(description);
+          return;
+        } catch (err) {
+          speak("Online AI failed. Switching to browser offline OCR.");
+        }
+      }
+
+      // 2. OFFLINE MODE: Tesseract.js running 100% in browser
+      try {
+        speak("Running offline text recognition...");
+        const result = await Tesseract.recognize(canvas, 'eng');
+        const text = result.data.text.trim();
+
+        if (text) {
+          speak("Offline Mode. Text detected: " + text);
+        } else {
+          speak("Offline Mode. No clear text found.");
+        }
+      } catch (ocrErr) {
+        speak("Unable to process image. Please try again.");
+      }
+    }
+  </script>
+</body>
+  </html>
+  
